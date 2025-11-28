@@ -154,7 +154,7 @@ client.on(Events.MessageCreate, async message => {
             let reply = '**Online Users:**\n';
             
             Object.values(users).forEach(u => {
-                reply += `🖥️ **${u.ip}** (${u.location})\nID: \`${u.deviceId}\`\nISP: ${u.isp}\n\n`;
+                reply += `🖥️ **${"REDACTED"}** (${u.location})\nID: \`${u.deviceId}\`\nISP: ${u.isp}\n\n`;
             });
             
             // Discord message limit is 2000 chars, truncate if needed
@@ -165,6 +165,40 @@ client.on(Events.MessageCreate, async message => {
             message.reply(reply);
         } catch (error) {
             message.reply(`Error fetching users: ${error.message}`);
+        }
+    }
+
+    // Command: !join [amount]
+    if (message.content.startsWith('!join')) {
+        const args = message.content.split(' ');
+        const amount = args[1] || null; // Optional amount/note
+
+        const entry = {
+            username: message.author.tag,
+            id: message.author.id,
+            avatar: message.author.displayAvatarURL(),
+            joined_at: Date.now(),
+            amount: amount
+        };
+
+        try {
+            await db.ref(`giveaway/entries/${message.author.id}`).set(entry);
+            message.reply(`🎟️ **Entry Confirmed!** ${amount ? `(Amount: ${amount})` : ''}`);
+        } catch (error) {
+            message.reply(`Error joining giveaway: ${error.message}`);
+        }
+    }
+
+    // Command: !clear_giveaway (Admin Only)
+    if (message.content.startsWith('!clear_giveaway')) {
+        if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            return message.reply('⛔ Admin only.');
+        }
+        try {
+            await db.ref('giveaway/entries').remove();
+            message.reply('🗑️ **Giveaway entries cleared.**');
+        } catch (error) {
+            message.reply(`Error clearing entries: ${error.message}`);
         }
     }
 });
