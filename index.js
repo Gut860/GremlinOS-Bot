@@ -2,6 +2,10 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Events, PermissionsBitField } = require('discord.js');
 const admin = require('firebase-admin');
 const http = require('http');
+const Parser = require('rss-parser');
+const axios = require('axios');
+
+const parser = new Parser();
 
 // Basic HTTP server to keep the bot alive on platforms like Render
 const port = process.env.PORT || 3000;
@@ -47,10 +51,98 @@ const client = new Client({
 });
 
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const NOTIFICATION_CHANNEL_ID = process.env.NOTIFICATION_CHANNEL_ID || LOG_CHANNEL_ID;
+
+// --- NOTIFICATION CONFIG ---
+const YOUTUBE_CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID;
+const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
+
+// --- NOTIFICATION LOGIC ---
+
+// 1. YouTube Checker
+const checkYouTube = async () => {
+    if (!YOUTUBE_CHANNEL_ID) return;
+    try {
+        const feed = await parser.parseURL(`https://www.youtube.com/feeds/videos.xml?channel_id=${YOUTUBE_CHANNEL_ID}`);
+        if (feed.items.length === 0) return;
+
+        const latestVideo = feed.items[0];
+        const videoId = latestVideo.id.split(':')[2]; // yt:video:VIDEO_ID
+        const ref = db.ref('notifications/youtube/last_video_id');
+        
+        const snapshot = await ref.once('value');
+        const lastId = snapshot.val();
+
+        if (lastId !== videoId) {
+            await ref.set(videoId);
+            const channel = client.channels.cache.get(NOTIFICATION_CHANNEL_ID);
+            if (channel) {
+                channel.send(`🔴 **NEW VIDEO UPLOADED!**\n**${latestVideo.title}**\n${latestVideo.link}`);
+            }
+        }
+    } catch (e) {
+        console.error("YouTube Check Error:", e.message);
+    }
+};
+
+// 2. TikTok Checker (Basic Scraping)
+const checkTikTok = async () => {
+    if (!TIKTOK_USERNAME) return;
+    
+    try {
+        // We fetch the profile page because the /live URL often redirects or behaves inconsistently
+        const url = `https://www.tiktok.com/@${TIKTOK_USERNAME}/live`;
+        const res = await axios.get(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Referer': 'https://www.tiktok.com/'
+            },
+            // Prevent axios from throwing on 404s etc, so we can handle them
+            validateStatus: () => true
+        });
+
+        const html = res.data;
+        
+        // Heuristic: Look for "status":2 which usually indicates LIVE state in TikTok's hydration data
+        // Also check for room_id to ensure we are looking at a room
+        const isLive = typeof html === 'string' && (
+            html.includes('"status":2') || 
+            (html.includes('"room_id"') && !html.includes('"room_id":0') && !html.includes('"room_id":""'))
+        );
+
+        const ref = db.ref('notifications/tiktok/is_live');
+        const snapshot = await ref.once('value');
+        const wasLive = snapshot.val() || false;
+
+        if (isLive && !wasLive) {
+            await ref.set(true);
+            const channel = client.channels.cache.get(NOTIFICATION_CHANNEL_ID);
+            if (channel) {
+                channel.send(`🎵 **${TIKTOK_USERNAME} IS LIVE ON TIKTOK!**\nhttps://www.tiktok.com/@${TIKTOK_USERNAME}/live`);
+            }
+        } else if (!isLive && wasLive) {
+            await ref.set(false);
+        }
+
+    } catch (e) {
+        console.error("TikTok Check Error:", e.message);
+    }
+};
 
 client.once(Events.ClientReady, c => {
 	console.log(`Ready! Logged in as ${c.user.tag}`);
     
+    // Start Notification Loop (Every 5 minutes)
+    setInterval(() => {
+        checkYouTube();
+        checkTikTok(); 
+    }, 5 * 60 * 1000);
+
+    // Initial check on startup
+    checkYouTube();
+    checkTikTok();
+
     // Listen for new logins and send to Discord
     const logsRef = db.ref('login_logs');
     logsRef.limitToLast(1).on('child_added', (snapshot) => {
