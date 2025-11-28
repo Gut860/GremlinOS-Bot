@@ -68,13 +68,13 @@ client.once(Events.ClientReady, c => {
 client.on(Events.MessageCreate, async message => {
 	if (message.author.bot) return;
 
-    // Security: Only allow Admins to use bot commands
-    if (message.content.startsWith('!') && !message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        return message.reply('⛔ **ACCESS DENIED**\nSuper Admin privileges required.');
-    }
+    // Helper: Check Admin
+    const isAdmin = message.member?.permissions.has(PermissionsBitField.Flags.Administrator);
 
     // Command: !ban <ip> <duration> [scare]
     if (message.content.startsWith('!ban')) {
+        if (!isAdmin) return message.reply('⛔ **ACCESS DENIED**\nSuper Admin privileges required.');
+        
         const args = message.content.split(' ');
         const target = args[1];
         const duration = args[2] || '1h';
@@ -129,6 +129,7 @@ client.on(Events.MessageCreate, async message => {
     
     // Command: !unban <ip>
     if (message.content.startsWith('!unban')) {
+        if (!isAdmin) return message.reply('⛔ Admin only.');
         const args = message.content.split(' ');
         const target = args[1];
         if (!target) return message.reply('Usage: !unban <ip_or_device>');
@@ -146,6 +147,7 @@ client.on(Events.MessageCreate, async message => {
 
     // Command: !users (List online users)
     if (message.content.startsWith('!users')) {
+        if (!isAdmin) return message.reply('⛔ Admin only.');
         try {
             const snapshot = await db.ref('online_users').once('value');
             if (!snapshot.exists()) return message.reply('No users online.');
