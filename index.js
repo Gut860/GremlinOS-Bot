@@ -55,25 +55,78 @@ const NOTIFICATION_CHANNEL_ID = process.env.NOTIFICATION_CHANNEL_ID || LOG_CHANN
 
 // --- NOTIFICATION CONFIG ---
 const YOUTUBE_CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID;
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
 
 // --- NOTIFICATION LOGIC ---
 
-// 1. YouTube Checker
+// 1. YouTube Checker (Supports API v3 & RSS)
 const checkYouTube = async () => {
-    if (!YOUTUBE_CHANNEL_ID) return;
+    if (!YOUTUBE_CHANNEL_ID) {
+        console.log("⚠️ YouTube Check Skipped: No YOUTUBE_CHANNEL_ID");
+        return;
+    }
+
+    // METHOD A: YouTube Data API v3 (Preferred - Faster)
+    if (YOUTUBE_API_KEY) {
+        try {
+            // The "Uploads" playlist ID is always the Channel ID with 'UC' replaced by 'UU'
+            const uploadsPlaylistId = YOUTUBE_CHANNEL_ID.replace(/^UC/, 'UU');
+            
+            const res = await axios.get('https://www.googleapis.com/youtube/v3/playlistItems', {
+                params: {
+                    part: 'snippet',
+                    playlistId: uploadsPlaylistId,
+                    maxResults: 1,
+                    key: YOUTUBE_API_KEY
+                }
+            });
+
+            if (!res.data.items || res.data.items.length === 0) return;
+
+            const item = res.data.items[0];
+            const videoId = item.snippet.resourceId.videoId;
+            const videoTitle = item.snippet.title;
+
+            const ref = db.ref('notifications/youtube/last_video_id');
+            const snapshot = await ref.once('value');
+            const lastId = snapshot.val();
+
+            // Debug Log
+            console.log(`[YouTube API] Latest: ${videoId} | Stored: ${lastId}`);
+
+            if (lastId !== videoId) {
+                console.log("🚨 New video detected (API)!");
+                await ref.set(videoId);
+                const channel = client.channels.cache.get(NOTIFICATION_CHANNEL_ID);
+                if (channel) {
+                    channel.send(`🔴 **NEW VIDEO UPLOADED!**\n**${videoTitle}**\nhttps://www.youtube.com/watch?v=${videoId}`);
+                }
+            }
+            return; // Success, skip RSS fallback
+
+        } catch (e) {
+            console.error("❌ YouTube API Error:", e.response?.data?.error?.message || e.message);
+            console.log("⚠️ Falling back to RSS...");
+        }
+    }
+
+    // METHOD B: RSS Feed (Fallback - Slower)
     try {
         const feed = await parser.parseURL(`https://www.youtube.com/feeds/videos.xml?channel_id=${YOUTUBE_CHANNEL_ID}`);
         if (feed.items.length === 0) return;
 
         const latestVideo = feed.items[0];
         const videoId = latestVideo.id.split(':')[2]; // yt:video:VIDEO_ID
-        const ref = db.ref('notifications/youtube/last_video_id');
         
+        const ref = db.ref('notifications/youtube/last_video_id');
         const snapshot = await ref.once('value');
         const lastId = snapshot.val();
 
+        console.log(`[YouTube RSS] Latest: ${videoId} | Stored: ${lastId}`);
+
         if (lastId !== videoId) {
+            console.log("🚨 New video detected (RSS)!");
             await ref.set(videoId);
             const channel = client.channels.cache.get(NOTIFICATION_CHANNEL_ID);
             if (channel) {
@@ -81,7 +134,7 @@ const checkYouTube = async () => {
             }
         }
     } catch (e) {
-        console.error("YouTube Check Error:", e.message);
+        console.error("❌ YouTube RSS Error:", e.message);
     }
 };
 
