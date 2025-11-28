@@ -133,11 +133,17 @@ const checkTikTok = async () => {
 client.once(Events.ClientReady, c => {
 	console.log(`Ready! Logged in as ${c.user.tag}`);
     
-    // Start Notification Loop (Every 5 minutes)
-    setInterval(() => {
-        checkYouTube();
-        checkTikTok(); 
-    }, 5 * 60 * 1000);
+    // Start Notification Loops
+    
+    // YouTube: Check every 1 minute
+    // Note: YouTube RSS feeds are cached by Google, so even if we check every second, 
+    // the feed itself usually takes 5-15 minutes to update after an upload.
+    setInterval(checkYouTube, 60 * 1000);
+
+    // TikTok: Check every 3 minutes
+    // Warning: Since we are scraping, checking too fast (e.g. every 30s) will get your IP banned by TikTok.
+    // 3 minutes is a safer balance between speed and safety.
+    setInterval(checkTikTok, 3 * 60 * 1000);
 
     // Initial check on startup
     checkYouTube();
