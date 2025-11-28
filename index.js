@@ -168,22 +168,34 @@ client.on(Events.MessageCreate, async message => {
         }
     }
 
-    // Command: !join [amount]
+    // Command: !join [optional_name]
     if (message.content.startsWith('!join')) {
         const args = message.content.split(' ');
-        const amount = args[1] || null; // Optional amount/note
+        // Use provided name or fallback to Discord username
+        let displayName = message.author.username;
+        if (args.length > 1) {
+            // Join all arguments after "!join" to allow spaces in names
+            displayName = message.content.slice(6).trim();
+        }
 
-        const entry = {
-            username: message.author.tag,
-            id: message.author.id,
-            avatar: message.author.displayAvatarURL(),
-            joined_at: Date.now(),
-            amount: amount
-        };
+        const userRef = db.ref(`giveaway/entries/${message.author.id}`);
 
         try {
-            await db.ref(`giveaway/entries/${message.author.id}`).set(entry);
-            message.reply(`🎟️ **Entry Confirmed!** ${amount ? `(Amount: ${amount})` : ''}`);
+            // Check if already joined
+            const snapshot = await userRef.once('value');
+            if (snapshot.exists()) {
+                return message.reply('⚠️ **You have already joined!** One entry per person.');
+            }
+
+            const entry = {
+                username: displayName,
+                id: message.author.id,
+                avatar: message.author.displayAvatarURL(),
+                joined_at: Date.now()
+            };
+
+            await userRef.set(entry);
+            message.reply(`🎟️ **Entry Confirmed!** Ticket Name: **${displayName}**`);
         } catch (error) {
             message.reply(`Error joining giveaway: ${error.message}`);
         }
