@@ -5,6 +5,14 @@ const http = require('http');
 const Parser = require('rss-parser');
 const axios = require('axios');
 
+console.log("--- BOT STARTUP DEBUG ---");
+console.log("Current Directory:", process.cwd());
+console.log("YOUTUBE_CHANNEL_ID loaded:", process.env.YOUTUBE_CHANNEL_ID ? "YES" : "NO");
+if (process.env.YOUTUBE_CHANNEL_ID) {
+    console.log("ID Length:", process.env.YOUTUBE_CHANNEL_ID.length);
+}
+console.log("-------------------------");
+
 const parser = new Parser();
 
 // Basic HTTP server to keep the bot alive on platforms like Render
@@ -53,10 +61,14 @@ const client = new Client({
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const NOTIFICATION_CHANNEL_ID = process.env.NOTIFICATION_CHANNEL_ID || LOG_CHANNEL_ID;
 
+console.log("--- CHANNEL CONFIG ---");
+console.log("LOG_CHANNEL_ID:", LOG_CHANNEL_ID);
+console.log("NOTIFICATION_CHANNEL_ID:", NOTIFICATION_CHANNEL_ID);
+console.log("----------------------");
+
 // --- NOTIFICATION CONFIG ---
 const YOUTUBE_CHANNEL_ID = process.env.YOUTUBE_CHANNEL_ID;
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME;
 
 // --- NOTIFICATION LOGIC ---
 
@@ -138,51 +150,6 @@ const checkYouTube = async () => {
     }
 };
 
-// 2. TikTok Checker (Basic Scraping)
-const checkTikTok = async () => {
-    if (!TIKTOK_USERNAME) return;
-    
-    try {
-        // We fetch the profile page because the /live URL often redirects or behaves inconsistently
-        const url = `https://www.tiktok.com/@${TIKTOK_USERNAME}/live`;
-        const res = await axios.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Referer': 'https://www.tiktok.com/'
-            },
-            // Prevent axios from throwing on 404s etc, so we can handle them
-            validateStatus: () => true
-        });
-
-        const html = res.data;
-        
-        // Heuristic: Look for "status":2 which usually indicates LIVE state in TikTok's hydration data
-        // Also check for room_id to ensure we are looking at a room
-        const isLive = typeof html === 'string' && (
-            html.includes('"status":2') || 
-            (html.includes('"room_id"') && !html.includes('"room_id":0') && !html.includes('"room_id":""'))
-        );
-
-        const ref = db.ref('notifications/tiktok/is_live');
-        const snapshot = await ref.once('value');
-        const wasLive = snapshot.val() || false;
-
-        if (isLive && !wasLive) {
-            await ref.set(true);
-            const channel = client.channels.cache.get(NOTIFICATION_CHANNEL_ID);
-            if (channel) {
-                channel.send(`🎵 **${TIKTOK_USERNAME} IS LIVE ON TIKTOK!**\nhttps://www.tiktok.com/@${TIKTOK_USERNAME}/live`);
-            }
-        } else if (!isLive && wasLive) {
-            await ref.set(false);
-        }
-
-    } catch (e) {
-        console.error("TikTok Check Error:", e.message);
-    }
-};
-
 client.once(Events.ClientReady, c => {
 	console.log(`Ready! Logged in as ${c.user.tag}`);
     
@@ -193,14 +160,8 @@ client.once(Events.ClientReady, c => {
     // the feed itself usually takes 5-15 minutes to update after an upload.
     setInterval(checkYouTube, 60 * 1000);
 
-    // TikTok: Check every 3 minutes
-    // Warning: Since we are scraping, checking too fast (e.g. every 30s) will get your IP banned by TikTok.
-    // 3 minutes is a safer balance between speed and safety.
-    setInterval(checkTikTok, 3 * 60 * 1000);
-
     // Initial check on startup
     checkYouTube();
-    checkTikTok();
 
     // Listen for new logins and send to Discord
     const logsRef = db.ref('login_logs');
